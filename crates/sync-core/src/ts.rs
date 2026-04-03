@@ -1,5 +1,41 @@
 /// Registration entry for TypeScript type generation.
-/// Each SyncEntity registers its TS interfaces via `inventory`.
+///
+/// Each entity annotated with `#[derive(SyncEntity)]` registers a
+/// `TsTypeRegistration` via the [`inventory`] crate. At codegen time,
+/// [`generate_ts_file`] collects all registrations and emits a complete
+/// TypeScript module with:
+///
+/// - Branded `Id<Tag>` type for type-safe entity IDs
+/// - `{Entity}Full` and `{Entity}Patch` interfaces matching the Rust structs
+/// - `EntityTag` union type
+/// - `InboundMessage` discriminated union (server-to-client)
+/// - `OutboundCommand` and `OutboundHandshake` interfaces (client-to-server)
+///
+/// # Registration (automatic)
+///
+/// The `SyncEntity` derive macro generates registrations automatically:
+///
+/// ```text
+/// inventory::submit! {
+///     TsTypeRegistration {
+///         entity_name: "Order",
+///         ts_full_interface: "export interface OrderFull { ... }",
+///         ts_patch_interface: "export interface OrderPatch { ... }",
+///     }
+/// }
+/// ```
+///
+/// # Type mappings
+///
+/// | Rust type             | TypeScript type           |
+/// |-----------------------|---------------------------|
+/// | `String`              | `string`                  |
+/// | `bool`                | `boolean`                 |
+/// | `i32`, `u64`, etc.    | `number`                  |
+/// | `Decimal`             | `string`                  |
+/// | `Id<Tag>`             | `Id<"Tag">`               |
+/// | `BTreeMap<K, V>`      | `Record<K, V>`            |
+/// | `Option<T>`           | `T \| null`               |
 pub struct TsTypeRegistration {
     pub entity_name: &'static str,
     pub ts_full_interface: &'static str,
@@ -10,6 +46,33 @@ inventory::collect!(TsTypeRegistration);
 
 /// Collect all registered TypeScript type definitions and produce the full
 /// `sync.ts` file content.
+///
+/// This function iterates over all [`TsTypeRegistration`] entries submitted
+/// via `inventory` and assembles them into a single TypeScript module. The
+/// output includes:
+///
+/// 1. **`Id<Tag>` branded type** -- A nominal type wrapper for UUID strings,
+///    preventing accidental mixing of entity IDs in TypeScript.
+/// 2. **Entity interfaces** -- `{Name}Full` and `{Name}Patch` for each
+///    registered entity, sorted alphabetically by entity name.
+/// 3. **`EntityTag` union** -- A string literal union of all entity names.
+/// 4. **`InboundMessage` discriminated union** -- Server-to-client messages,
+///    discriminated on `entityTag` + `kind`.
+/// 5. **`OutboundCommand` / `OutboundHandshake`** -- Client-to-server types.
+///
+/// The generated file is prefixed with `// AUTO-GENERATED — DO NOT EDIT`.
+///
+/// # Usage
+///
+/// Typically called from a `bin/codegen.rs` binary:
+///
+/// ```text
+/// fn main() {
+///     domain::register_entities();
+///     let content = sync_core::ts::generate_ts_file();
+///     std::fs::write("packages/client/generated/sync.ts", content).unwrap();
+/// }
+/// ```
 pub fn generate_ts_file() -> String {
     let mut output = String::new();
 
