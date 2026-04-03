@@ -103,6 +103,8 @@ fn rust_type_to_ts(ty: &Type) -> String {
                 }
                 "unknown | null".to_string()
             }
+            // If type already ends in "Full", use as-is (it's a generated Full struct)
+            other if other.ends_with("Full") => other.to_string(),
             other => format!("{}Full", other),
         }
     } else {
@@ -116,14 +118,15 @@ fn rust_type_to_ts_patch(ty: &Type, nested: bool) -> String {
         let k_ts = rust_type_to_ts(_k);
         if nested {
             let v_name = type_name(v).unwrap_or_else(|| "unknown".to_string());
-            format!("Record<{}, {}Patch | null>", k_ts, v_name)
+            let patch_name = to_patch_name(&v_name);
+            format!("Record<{}, {} | null>", k_ts, patch_name)
         } else {
             let v_ts = rust_type_to_ts(v);
             format!("Record<{}, {} | null>", k_ts, v_ts)
         }
     } else if nested {
         let name = type_name(ty).unwrap_or_else(|| "unknown".to_string());
-        format!("{}Patch", name)
+        format!("{}", to_patch_name(&name))
     } else {
         rust_type_to_ts(ty)
     }
@@ -331,7 +334,7 @@ pub fn derive_sync_entity(input: TokenStream) -> TokenStream {
     );
 
     let expanded = quote! {
-        #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         pub struct #full_name {
             #(#full_fields,)*

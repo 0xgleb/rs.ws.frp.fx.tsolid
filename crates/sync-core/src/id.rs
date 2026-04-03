@@ -8,10 +8,44 @@ use uuid::Uuid;
 ///
 /// The phantom type parameter `E` prevents accidental mixing of IDs
 /// from different entity types at compile time.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id<E> {
     inner: Uuid,
     _phantom: PhantomData<fn() -> E>,
+}
+
+// Manual impls to avoid bounds on E
+impl<E> Clone for Id<E> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<E> Copy for Id<E> {}
+
+impl<E> PartialEq for Id<E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl<E> Eq for Id<E> {}
+
+impl<E> PartialOrd for Id<E> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<E> Ord for Id<E> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.inner.cmp(&other.inner)
+    }
+}
+
+impl<E> Hash for Id<E> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.inner.hash(state);
+    }
 }
 
 impl<E> Id<E> {
