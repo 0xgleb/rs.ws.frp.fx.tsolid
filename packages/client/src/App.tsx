@@ -1,8 +1,42 @@
+/**
+ * @module App
+ *
+ * Main application component for the sync protocol PoC.
+ *
+ * Renders a real-time order management dashboard with:
+ * - Connection status indicator (green/red dot)
+ * - Order placement controls (symbol, side)
+ * - Order grid displaying all synchronized orders
+ * - Per-order detail cards showing fills (nested map) and notes (leaf map)
+ *
+ * ## Data flow
+ *
+ * ```
+ * Socket.IO ──► socket.ts (decode) ──► store.ts (apply) ──► App.tsx (render)
+ *                                                                │
+ *                                                                ▼
+ *                                                         OrderCard components
+ * ```
+ */
+
 import { Component, For, Show, createSignal, onMount, onCleanup } from "solid-js";
 import { store, applyMessage, setConnected, getStoreSnapshot } from "./store.ts";
 import { createConnection, sendCommand, sendHandshake, type SyncConnection } from "./socket.ts";
 import type { OrderFull } from "../generated/sync.ts";
 
+/**
+ * Displays a single order's details in a card layout.
+ *
+ * Shows:
+ * - Symbol and status badge (color-coded by status)
+ * - Side, total/filled quantities, average price
+ * - Fill executions (from the nested `fills` map)
+ * - Notes (from the leaf `notes` map)
+ * - Truncated entity ID
+ *
+ * @param props.id - The order's UUID string.
+ * @param props.order - The full order state from the store.
+ */
 const OrderCard: Component<{ id: string; order: OrderFull }> = (props) => {
   const fillEntries = () => Object.entries(props.order.fills);
   const noteEntries = () => Object.entries(props.order.notes);
@@ -59,6 +93,19 @@ const OrderCard: Component<{ id: string; order: OrderFull }> = (props) => {
   );
 };
 
+/**
+ * Root application component.
+ *
+ * On mount, creates a Socket.IO connection and wires up:
+ * - Connection/disconnection status tracking
+ * - Handshake replay on connect (sends current state for all known entities)
+ * - Incoming message processing via `applyMessage`
+ *
+ * Provides two user actions:
+ * - **Place Order** -- Sends a `PlaceOrder` command with the selected symbol/side
+ * - **Update First Order** -- Sends an `UpdateOrder` command that sets the first
+ *   order's status to "partially_filled" with filledQuantity "500"
+ */
 const App: Component = () => {
   const [conn, setConn] = createSignal<SyncConnection | null>(null);
   const [symbol, setSymbol] = createSignal("BTC");

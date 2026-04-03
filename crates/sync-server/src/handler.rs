@@ -6,7 +6,29 @@ use sync_core::message::{MessageKind, OutboundMessage};
 use sync_core::Diffable;
 use uuid::Uuid;
 
-/// Handle the sync handshake: client sends what it has, server responds with diffs.
+/// Handle the sync handshake: client sends its current state, server
+/// responds with the minimal update needed to synchronize.
+///
+/// ## Protocol
+///
+/// The client emits a `"handshake"` event with:
+/// ```json
+/// {
+///   "entityTag": "Order",
+///   "entityId": "<uuid>",
+///   "kind": "patch",
+///   "payload": { /* client's current state as patch */ }
+/// }
+/// ```
+///
+/// The server:
+/// 1. Looks up the entity by tag and ID.
+/// 2. If the client payload is empty, responds with a `Full` message
+///    (complete entity state).
+/// 3. If the client has state, reconstructs the client's view by merging
+///    the payload into a default, diffs it against the server's canonical
+///    state, and responds with a `Patch` message (only changed fields).
+/// 4. If no diff is needed (client is up to date), sends nothing.
 pub async fn on_handshake(
     socket: SocketRef,
     Data(data): Data<Value>,
@@ -59,6 +81,53 @@ pub async fn on_handshake(
 }
 
 /// Handle incoming commands from clients.
+///
+/// ## Supported commands
+///
+/// ### `PlaceOrder`
+///
+/// Creates a new order with the given symbol and side. Broadcasts a
+/// `Full` message to all clients in the `"orders"` room.
+///
+/// Payload:
+/// ```json
+/// {
+///   "requestId": "<uuid>",
+///   "command": "PlaceOrder",
+///   "payload": {
+///     "symbol": "BTC",
+///     "side": "buy",
+///     "entityId": "<optional uuid>"
+///   }
+/// }
+/// ```
+///
+/// ### `UpdateOrder`
+///
+/// Applies a patch to an existing order. Broadcasts the computed diff
+/// (not the raw input patch) to all clients, ensuring only actual
+/// changes are transmitted.
+///
+/// Payload:
+/// ```json
+/// {
+///   "requestId": "<uuid>",
+///   "command": "UpdateOrder",
+///   "payload": {
+///     "entityId": "<uuid>",
+///     "patch": { "status": "filled", "filledQuantity": "1000" }
+///   }
+/// }
+/// ```
+///
+/// ## Acknowledgment
+///
+/// All commands receive an `"ack"` event with:
+/// ```json
+/// { "requestId": "<uuid>", "status": "ok" }
+/// ```
+///
+/// Unknown commands get `"status": "error"` with a message.
 pub async fn on_command(
     socket: SocketRef,
     Data(data): Data<Value>,
