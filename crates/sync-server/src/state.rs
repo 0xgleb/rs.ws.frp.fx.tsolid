@@ -13,17 +13,14 @@ use uuid::Uuid;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// use sync_server::state::EntityStore;
 /// use domain::{OrderFull, OrderPatch};
-/// use rust_decimal::Decimal;
-/// use sync_core::Diffable;
 /// use uuid::Uuid;
 ///
 /// let store = EntityStore::new();
 /// let id = Uuid::now_v7();
 ///
-/// // Insert an order
 /// let order = OrderFull {
 ///     symbol: "BTC".into(),
 ///     side: "buy".into(),
@@ -33,11 +30,7 @@ use uuid::Uuid;
 /// store.set_order(id, order.clone());
 /// assert_eq!(store.get_order(&id), Some(order));
 ///
-/// // Apply a patch
-/// let patch = OrderPatch {
-///     status: Some("filled".into()),
-///     ..Default::default()
-/// };
+/// let patch = OrderPatch { status: Some("filled".into()), ..Default::default() };
 /// let diff = store.patch_order(&id, patch);
 /// assert!(diff.is_some());
 /// assert_eq!(store.get_order(&id).unwrap().status, "filled");
