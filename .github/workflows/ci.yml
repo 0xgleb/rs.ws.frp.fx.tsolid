@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "claude/**"]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check
+        run: cargo check --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Codegen
+        run: cargo run --bin codegen
+
+      - name: Upload generated types
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-types
+          path: packages/client/generated/sync.ts
+
+  typescript:
+    name: TypeScript check
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/client/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: generated-types
+          path: packages/client/generated
+
+      - name: Install dependencies
+        working-directory: packages/client
+        run: npm ci
+
+      - name: Type check
+        working-directory: packages/client
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: packages/client
+        run: npx vite build
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/client/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: generated-types
+          path: packages/client/generated
+
+      - name: Build server
+        run: cargo build --bin server
+
+      - name: Install client dependencies
+        working-directory: packages/client
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: packages/client
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: packages/client
+        run: npx playwright test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: packages/client/test-results/
+          retention-days: 7
