@@ -9,6 +9,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# IMPORTANT: Job names (rs, ts, e2e) are required status checks in GitHub
+# branch protection for master. If you rename or add jobs, update the
+# branch protection rules in GitHub repo settings to match.
+
 jobs:
   rust:
     name: rs
