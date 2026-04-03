@@ -8,16 +8,16 @@ reviews:
     # message that CodeRabbit posts on PRs. After this many reviewed commits,
     # it stops reviewing new ones. Default is 5; raised to 10. Set to 0 to
     # disable entirely.
-    auto_pause_after_reviewed_commits: 6
+    auto_pause_after_reviewed_commits: 10
 
   profile: assertive
   request_changes_workflow: true
-  collapse_walkthrough: true
-  review_details: false
+  review_details: true
+  collapse_walkthrough: false
   sequence_diagrams: false
   estimate_code_review_effort: false
-  auto_assign_reviewers: false
   auto_apply_labels: true
+  auto_assign_reviewers: false
   poem: false
 
   path_instructions:
