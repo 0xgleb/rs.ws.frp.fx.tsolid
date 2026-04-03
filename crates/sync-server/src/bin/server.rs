@@ -1,3 +1,17 @@
+//! Binary entry point for the sync protocol server.
+//!
+//! Starts an Axum HTTP server with Socket.IO on port 3000.
+//!
+//! ## Usage
+//!
+//! ```bash
+//! cargo run --bin server
+//! ```
+//!
+//! The server exposes:
+//! - `GET /health` -- Health check endpoint returning `"ok"`
+//! - `ws://` via Socket.IO -- Real-time sync protocol
+
 use sync_server::build_app;
 use sync_server::state::EntityStore;
 

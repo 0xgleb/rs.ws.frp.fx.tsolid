@@ -1,8 +1,87 @@
+//! # sync-macro
+//!
+//! Procedural derive macro for the entity synchronization framework.
+//!
+//! Provides `#[derive(SyncEntity)]` which generates everything needed to
+//! synchronize a Rust struct over the wire:
+//!
+//! - **`{Name}Full`** -- Complete entity state (all fields public, derives
+//!   `Serialize`, `Deserialize`, `Clone`, `Debug`, `Default`, `PartialEq`).
+//! - **`{Name}Patch`** -- Sparse update (scalar fields wrapped in `Option`,
+//!   map fields use tombstone semantics, empty fields skipped in serialization).
+//! - **`Diffable` impl** -- Field-by-field `diff` and `merge` using helpers
+//!   from `sync_core::diffable`.
+//! - **`FullToPatch` impl** -- Converts a Full value to a Patch with all
+//!   fields populated (used for new entries in nested maps).
+//! - **TypeScript registration** -- Registers `TsTypeRegistration` via
+//!   `inventory` for automatic TS interface generation.
+//!
+//! ## Usage
+//!
+//! ```rust,ignore
+//! use sync_macro::SyncEntity;
+//! use rust_decimal::Decimal;
+//! use std::collections::BTreeMap;
+//!
+//! #[derive(SyncEntity)]
+//! pub struct OrderLine {
+//!     pub quantity: Decimal,
+//!     pub price: Decimal,
+//! }
+//!
+//! // Generates: OrderLineFull, OrderLinePatch, Diffable impl, etc.
+//! ```
+//!
+//! ## Field attributes
+//!
+//! ### `#[sync(nested)]`
+//!
+//! Marks a `BTreeMap` field whose values are themselves `Diffable` entities.
+//! Without this attribute, map values are treated as leaf scalars (replaced
+//! wholesale on change). With it, values are diffed recursively.
+//!
+//! ```rust,ignore
+//! #[derive(SyncEntity)]
+//! pub struct Order {
+//!     pub symbol: String,
+//!     #[sync(nested)]
+//!     pub fills: BTreeMap<String, OrderLineFull>,  // recursive diff
+//!     pub notes: BTreeMap<String, String>,          // leaf diff
+//! }
+//! ```
+//!
+//! ## Generated code example
+//!
+//! Given `#[derive(SyncEntity)] struct Foo { pub x: i32 }`, the macro produces:
+//!
+//! ```rust,ignore
+//! #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+//! #[serde(rename_all = "camelCase")]
+//! pub struct FooFull { pub x: i32 }
+//!
+//! #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+//! #[serde(rename_all = "camelCase")]
+//! pub struct FooPatch {
+//!     #[serde(default, skip_serializing_if = "Option::is_none")]
+//!     pub x: Option<i32>,
+//! }
+//!
+//! impl Diffable for FooFull {
+//!     type Patch = FooPatch;
+//!     fn diff(&self, other: &Self) -> Option<FooPatch> { /* ... */ }
+//!     fn merge(self, patch: FooPatch) -> Self { /* ... */ }
+//! }
+//! ```
+
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput, Field, Fields, Ident, Type};
 
 /// Determines if a field has the `#[sync(nested)]` attribute.
+///
+/// Fields marked `#[sync(nested)]` participate in recursive diffing:
+/// their values implement `Diffable`, so the macro generates calls to
+/// `diff_nested_map` / `merge_nested_map` instead of the leaf variants.
 fn is_nested(field: &Field) -> bool {
     for attr in &field.attrs {
         if attr.path().is_ident("sync") {
@@ -16,7 +95,10 @@ fn is_nested(field: &Field) -> bool {
     false
 }
 
-/// Check if a type is `BTreeMap<K, V>` and return (K, V) if so.
+/// Check if a type is `BTreeMap<K, V>` and extract `(K, V)` type references.
+///
+/// Returns `None` for non-map types. Used to determine whether a field
+/// should generate map diff/merge calls vs. scalar diff/merge calls.
 fn extract_btreemap_types(ty: &Type) -> Option<(&Type, &Type)> {
     if let Type::Path(type_path) = ty {
         let segment = type_path.path.segments.last()?;
@@ -38,7 +120,8 @@ fn extract_btreemap_types(ty: &Type) -> Option<(&Type, &Type)> {
     None
 }
 
-/// Get the last segment name of a type path.
+/// Get the last segment name of a type path (e.g., `OrderLineFull` from
+/// `crate::domain::OrderLineFull`).
 fn type_name(ty: &Type) -> Option<String> {
     if let Type::Path(type_path) = ty {
         type_path.path.segments.last().map(|s| s.ident.to_string())
@@ -47,8 +130,10 @@ fn type_name(ty: &Type) -> Option<String> {
     }
 }
 
-/// For a type name like "OrderLineFull", produce "OrderLinePatch".
-/// If the name doesn't end in "Full", just append "Patch".
+/// Convert a Full type name to its corresponding Patch name.
+///
+/// - `"OrderLineFull"` -> `"OrderLinePatch"`
+/// - `"Foo"` -> `"FooPatch"` (if no "Full" suffix)
 fn to_patch_name(type_name: &str) -> String {
     if let Some(base) = type_name.strip_suffix("Full") {
         format!("{}Patch", base)
@@ -57,7 +142,18 @@ fn to_patch_name(type_name: &str) -> String {
     }
 }
 
-/// Map a Rust type to its TypeScript equivalent.
+/// Map a Rust type to its TypeScript equivalent for Full interfaces.
+///
+/// Conversion rules:
+/// - `String` -> `string`
+/// - `bool` -> `boolean`
+/// - Numeric types (`i32`, `u64`, `f64`, etc.) -> `number`
+/// - `Decimal` -> `string` (arbitrary-precision, serialized as string)
+/// - `Id<Tag>` -> `Id<"Tag">` (branded type)
+/// - `BTreeMap<K, V>` -> `Record<K_ts, V_ts>`
+/// - `Option<T>` -> `T_ts | null`
+/// - Types ending in "Full" -> kept as-is (they're generated interfaces)
+/// - Other types -> appended with "Full"
 fn rust_type_to_ts(ty: &Type) -> String {
     if let Type::Path(type_path) = ty {
         let segment = type_path.path.segments.last().unwrap();
@@ -112,7 +208,11 @@ fn rust_type_to_ts(ty: &Type) -> String {
     }
 }
 
-/// Map a Rust type to its TS patch equivalent.
+/// Map a Rust type to its TypeScript Patch equivalent.
+///
+/// For map types, values become nullable (`V | null`) to support
+/// tombstone deletions. For nested maps, the value type is converted
+/// to its Patch variant.
 fn rust_type_to_ts_patch(ty: &Type, nested: bool) -> String {
     if let Some((_k, v)) = extract_btreemap_types(ty) {
         let k_ts = rust_type_to_ts(_k);
@@ -132,6 +232,30 @@ fn rust_type_to_ts_patch(ty: &Type, nested: bool) -> String {
     }
 }
 
+/// Derive macro for creating synchronizable entity types.
+///
+/// Annotate a struct with `#[derive(SyncEntity)]` to generate:
+///
+/// - `{Name}Full` -- Complete state struct with all fields public
+/// - `{Name}Patch` -- Sparse patch struct with optional fields
+/// - `Diffable` implementation for computing diffs and applying merges
+/// - `FullToPatch` implementation for converting Full -> Patch
+/// - TypeScript interface registration via `inventory`
+///
+/// ## Supported field types
+///
+/// - **Scalar fields** (`String`, `Decimal`, `bool`, numeric types, `Id<T>`)
+///   -- Wrapped in `Option<T>` in the Patch struct.
+/// - **Leaf maps** (`BTreeMap<K, V>` without `#[sync(nested)]`) -- Patch
+///   type becomes `BTreeMap<K, Option<V>>` with `None` as tombstone.
+/// - **Nested maps** (`BTreeMap<K, V>` with `#[sync(nested)]`) -- Values
+///   must be `{Something}Full` types that are themselves `Diffable`. Patch
+///   type becomes `BTreeMap<K, Option<VPatch>>`.
+///
+/// ## Panics
+///
+/// - If applied to an enum, union, or tuple struct (only named-field structs
+///   are supported).
 #[proc_macro_derive(SyncEntity, attributes(sync))]
 pub fn derive_sync_entity(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -391,6 +515,12 @@ pub fn derive_sync_entity(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Convert a `snake_case` identifier to `camelCase` for TypeScript output.
+///
+/// Examples:
+/// - `total_quantity` -> `totalQuantity`
+/// - `filled_quantity` -> `filledQuantity`
+/// - `symbol` -> `symbol` (no change for single words)
 fn to_camel_case(s: &str) -> String {
     let mut result = String::new();
     let mut capitalize_next = false;
