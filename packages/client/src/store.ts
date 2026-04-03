@@ -85,14 +85,14 @@ export function applyMessage(msg: SyncMessage): void {
     case "Order": {
       const id = msg.entityId;
       if (msg.kind === "full") {
-        // Full replacement — use reconcile for structural sharing
-        setStore("orders", id, reconcile(msg.payload as OrderFull));
+        // Full replacement — set the entire order at this key
+        setStore("orders", { [id]: msg.payload as OrderFull });
       } else {
         // Patch — merge into existing state
         const existing = store.orders[id];
         if (existing !== undefined) {
           const merged = mergeOrderPatch(existing, msg.payload as OrderPatch);
-          setStore("orders", id, reconcile(merged));
+          setStore("orders", { [id]: merged });
         }
         // If entity doesn't exist and we get a patch, ignore it
         // (server should send Full for new entities)

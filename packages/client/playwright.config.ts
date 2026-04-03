@@ -1,0 +1,31 @@
+import { defineConfig } from "@playwright/test";
+
+export default defineConfig({
+  testDir: "./e2e",
+  timeout: 30_000,
+  retries: 0,
+  use: {
+    baseURL: "http://localhost:5173",
+    headless: true,
+  },
+  webServer: [
+    {
+      command: "cd ../.. && cargo run --bin server",
+      port: 3000,
+      timeout: 60_000,
+      reuseExistingServer: true,
+    },
+    {
+      command: "npx vite --port 5173",
+      port: 5173,
+      timeout: 30_000,
+      reuseExistingServer: true,
+    },
+  ],
+  projects: [
+    {
+      name: "chromium",
+      use: { browserName: "chromium" },
+    },
+  ],
+});

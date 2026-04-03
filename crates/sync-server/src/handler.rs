@@ -99,7 +99,8 @@ pub async fn on_command(
                 kind: MessageKind::Full,
                 payload: serde_json::to_value(&order).unwrap(),
             };
-            let _ = socket.within("orders").emit("sync", &msg);
+            // Broadcast to room (includes sender)
+            let _ = socket.within("orders").emit("sync", &msg).await;
 
             let ack = serde_json::json!({
                 "requestId": request_id,
@@ -126,7 +127,7 @@ pub async fn on_command(
                     kind: MessageKind::Patch,
                     payload: serde_json::to_value(&applied_diff).unwrap(),
                 };
-                let _ = socket.within("orders").emit("sync", &msg);
+                let _ = socket.within("orders").emit("sync", &msg).await;
             }
 
             let ack = serde_json::json!({
@@ -144,19 +145,4 @@ pub async fn on_command(
             let _ = socket.emit("ack", &ack);
         }
     }
-}
-
-/// Broadcast a patch to all clients watching orders.
-pub fn broadcast_order_patch(
-    io: &socketioxide::SocketIo,
-    entity_id: Uuid,
-    patch: &OrderPatch,
-) {
-    let msg = OutboundMessage {
-        entity_tag: "Order".into(),
-        entity_id: entity_id.to_string(),
-        kind: MessageKind::Patch,
-        payload: serde_json::to_value(patch).unwrap(),
-    };
-    let _ = io.within("orders").emit("sync", &msg);
 }
