@@ -1,0 +1,14 @@
+[package]
+name = "sync-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+inventory = { workspace = true }
+
+[dev-dependencies]
+json-patch = { workspace = true }
